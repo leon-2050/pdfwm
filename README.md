@@ -39,7 +39,11 @@ python pdfwm_gui.py 文件.pdf    # 直接打开某份 PDF
 
 Windows 上也可以双击 `启动PDF水印.bat`（自动建 venv 装依赖）。
 
-打包成免安装单文件 exe（24 MB，在 [Releases](../../releases) 下载）：
+直接下载免安装单文件 exe（24 MB，Windows x64）：
+
+**[⬇ pdfwm-v1.1.0-win64.zip](https://github.com/leon-2050/pdfwm/releases/download/v1.1.0/pdfwm-v1.1.0-win64.zip)** — 解压后双击 `pdfwm-gui.exe`
+
+自己打包（PyInstaller）：
 
 ```bash
 pyinstaller --onefile --windowed --name "PDF水印工具" --icon icon.ico \

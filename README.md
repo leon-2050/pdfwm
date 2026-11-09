@@ -27,6 +27,7 @@
 | 层级 | 正文上层 / 正文下层 |
 | 页码范围 | 留空=全部，例 `1-3,7` |
 | 抗剔除 | 栅格化后水印进像素，`qpdf --qdf` / `mutool` 剔不掉（代价：文字不可检索） |
+| 记住上次参数 | 水印文字 / 第二行 / 模式 / 角度 / 不透明度 / 大小 / 颜色 / 页码 / 层级 / 图片 / 抗剔除，下次启动自动带回 |
 | 批量导出 | 读 CSV，每个收件人一份唯一水印 |
 
 ## 安装运行
@@ -89,6 +90,21 @@ python pdfwm.py in.pdf --batch recipients.csv --outdir ./out --angle 40
 
 进一步想指认到人，可以给每个收件人的**角度做微差**（43°/45°/47°）——泄露图的角度本身就是签名。
 
+## 记住上次参数
+
+界面里的水印文字、第二行、模式、角度、不透明度、大小、颜色、页码范围、层级、图片水印、抗剔除开关，改动后自动保存，下次启动原样带回。拖动滑块不会每动一下就写文件（600 ms 防抖），关窗时再强制同步存一次。
+
+配置位置：
+
+```
+%APPDATA%\pdfwm\settings.json
+```
+
+- 原子写入（先写 `.tmp` 再 replace），断电不会留下半个 JSON
+- 文件损坏或被手工改坏时自动退回默认值，不会导致启动失败
+- 图片水印的路径若已失效，启动时自动清空那一项
+- 想恢复默认：删掉这个文件即可
+
 ## 透明度与抗剔除的本质取舍
 
 矢量水印是页面内容对象，`qpdf --qdf` 或 `mutool clean` 都能删。想抗剔除只有两条路：栅格化（本项目 `--flatten`），或直接输出图片 PDF。代价是文字层消失，不可检索、不可复制。
@@ -119,6 +135,7 @@ PDFWM_SELFTEST=1 python pdfwm_gui.py
 ```
 OK render / body preserved / watermark text / cjk font
 OK tile mode / tile repeats / rasterize strips text / rasterize renders / pages intact
+OK settings roundtrip
 ```
 
 ## 文件

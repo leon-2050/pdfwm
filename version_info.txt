@@ -1,7 +1,7 @@
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 0, 0, 0),
-    prodvers=(1, 0, 0, 0),
+    filevers=(1, 2, 0, 0),
+    prodvers=(1, 2, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -15,12 +15,12 @@ VSVersionInfo(
         '080404B0',
         [StringStruct('CompanyName', 'Internal Tools'),
          StringStruct('FileDescription', 'PDF 水印工具 - 可视化加水印'),
-         StringStruct('FileVersion', '1.0.0.0'),
+         StringStruct('FileVersion', '1.2.0.0'),
          StringStruct('InternalName', 'pdfwm'),
          StringStruct('LegalCopyright', 'Internal use'),
          StringStruct('OriginalFilename', 'PDF水印工具.exe'),
          StringStruct('ProductName', 'PDF 水印工具'),
-         StringStruct('ProductVersion', '1.0.0.0')])
+         StringStruct('ProductVersion', '1.2.0.0')])
     ]),
     VarFileInfo([VarStruct('Translation', [2052, 1200])])
   ]

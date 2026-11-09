@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import sys
 import tkinter as tk
@@ -21,11 +22,47 @@ import pdfwm as engine  # noqa: E402
 
 PREVIEW_MAX = (620, 760)
 
+# 配置落在 %APPDATA%\pdfwm\settings.json：exe 是单文件，程序目录可能只读且会被替换，
+# 放用户目录才能跨版本、跨启动稳定保留。
+CONFIG_DIR = os.path.join(
+    os.environ.get("APPDATA") or os.path.expanduser("~"), "pdfwm")
+CONFIG_PATH = os.path.join(CONFIG_DIR, "settings.json")
+
+# 这些是可记忆的界面参数，键名与 build_args 对齐
+PERSIST_KEYS = ("text", "owner", "mode", "angle", "opacity", "scale",
+                "color", "pages", "layer", "image", "raster")
+
 
 def resource_path(name: str) -> str:
     """打包后资源在 sys._MEIPASS 里，源码运行时在脚本同目录。"""
     base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, name)
+
+
+def load_settings() -> dict:
+    """读上次的参数；任何异常都退回空字典，绝不让配置损坏导致打不开界面。"""
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return {}
+        return {k: v for k, v in data.items() if k in PERSIST_KEYS}
+    except Exception:
+        return {}
+
+
+def save_settings(values: dict) -> bool:
+    """原子写：先写 .tmp 再 replace，避免断电/崩溃留下半个 JSON。"""
+    try:
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        tmp = CONFIG_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({k: values.get(k) for k in PERSIST_KEYS},
+                      f, ensure_ascii=False, indent=2)
+        os.replace(tmp, CONFIG_PATH)
+        return True
+    except Exception:
+        return False
 
 
 class App(ttk.Frame):
@@ -36,24 +73,37 @@ class App(ttk.Frame):
         self.page_idx = 0
         self.page_count = 0
         self._preview_job = None
+        self._save_job = None
         self._photo = None
 
-        self.v_text = tk.StringVar(value="内部资料 CONFIDENTIAL")
-        self.v_owner = tk.StringVar(value="")
-        self.v_mode = tk.StringVar(value="center")
-        self.v_angle = tk.DoubleVar(value=45)
-        self.v_opacity = tk.DoubleVar(value=0.12)
-        self.v_scale = tk.DoubleVar(value=0.85)
-        self.v_color = tk.StringVar(value="#cc0000")
-        self.v_pages = tk.StringVar(value="")
-        self.v_layer = tk.StringVar(value="over")
-        self.v_image = tk.StringVar(value="")
-        self.v_raster = tk.BooleanVar(value=False)
-        self.v_compare = tk.BooleanVar(value=False)
+        # 上次用过的参数（没有就退回默认值）
+        cfg = load_settings()
+
+        def val(key, default):
+            v = cfg.get(key, default)
+            return default if v is None else v
+
+        self.v_text = tk.StringVar(value=val("text", "内部资料 CONFIDENTIAL"))
+        self.v_owner = tk.StringVar(value=val("owner", ""))
+        self.v_mode = tk.StringVar(value=val("mode", "center"))
+        self.v_angle = tk.DoubleVar(value=val("angle", 45))
+        self.v_opacity = tk.DoubleVar(value=val("opacity", 0.12))
+        self.v_scale = tk.DoubleVar(value=val("scale", 0.85))
+        self.v_color = tk.StringVar(value=val("color", "#cc0000"))
+        self.v_pages = tk.StringVar(value=val("pages", ""))
+        self.v_layer = tk.StringVar(value=val("layer", "over"))
+        self.v_image = tk.StringVar(value=val("image", ""))
+        self.v_raster = tk.BooleanVar(value=bool(val("raster", False)))
+        self.v_compare = tk.BooleanVar(value=False)   # 对比是临时动作，不记忆
         self.v_pageinfo = tk.StringVar(value="- / -")
         self.v_status = tk.StringVar(value="打开一个 PDF 开始")
 
+        # 图片水印文件若已被删掉，别留一个坏路径在界面上
+        if self.v_image.get() and not os.path.isfile(self.v_image.get()):
+            self.v_image.set("")
+
         self._build()
+        self._bind_persist()
         if pdf_path:
             self.load(pdf_path)
 
@@ -183,6 +233,64 @@ class App(ttk.Frame):
         ttk.Scale(parent, from_=lo, to=hi, variable=var, command=on_move,
                   length=170).grid(row=row, column=1, sticky="we", pady=(4, 0))
         return row + 1
+
+    # ---------------- 记忆上次参数 ----------------
+    def _collect_settings(self) -> dict:
+        return {
+            "text": self.v_text.get(),
+            "owner": self.v_owner.get(),
+            "mode": self.v_mode.get(),
+            "angle": float(self.v_angle.get()),
+            "opacity": float(self.v_opacity.get()),
+            "scale": float(self.v_scale.get()),
+            "color": self.v_color.get(),
+            "pages": self.v_pages.get(),
+            "layer": self.v_layer.get(),
+            "image": self.v_image.get(),
+            "raster": bool(self.v_raster.get()),
+        }
+
+    def _bind_persist(self):
+        """任一参数变化都延迟落盘（防抖 600ms），并在关窗时无条件再存一次。
+
+        只挂在 var 的 trace 上，不逐个改控件回调 —— 否则拖滑块每移动 1px 就写文件。
+        """
+        for var in (self.v_text, self.v_owner, self.v_mode, self.v_angle,
+                    self.v_opacity, self.v_scale, self.v_color, self.v_pages,
+                    self.v_layer, self.v_image, self.v_raster):
+            var.trace_add("write", lambda *_a: self._schedule_settings_save())
+        try:
+            self.winfo_toplevel().protocol(
+                "WM_DELETE_WINDOW", self._on_close)
+        except Exception:
+            pass
+
+    def _schedule_settings_save(self):
+        if self._save_job:
+            try:
+                self.after_cancel(self._save_job)
+            except Exception:
+                pass
+        self._save_job = self.after(600, self._flush_settings)
+
+    def _flush_settings(self):
+        self._save_job = None
+        save_settings(self._collect_settings())
+
+    def _on_close(self):
+        # 关窗前同步写盘：异步任务来不及跑就会被销毁
+        if self._save_job:
+            try:
+                self.after_cancel(self._save_job)
+            except Exception:
+                pass
+            self._save_job = None
+        ok = save_settings(self._collect_settings())
+        self._dbg(f"settings saved on close: {ok} -> {CONFIG_PATH}")
+        try:
+            self.winfo_toplevel().destroy()
+        except Exception:
+            raise SystemExit(0)
 
     # ---------------- actions ----------------
     def pick(self):
@@ -384,6 +492,7 @@ def _selftest() -> int:
         ("rasterize strips text", ftext.strip() == ""),
         ("rasterize renders", fim.size[0] > 100),
         ("pages intact", total == 1 and stamped == 1),
+        ("settings roundtrip", _selftest_settings()),
     ]
     for name, ok in checks:
         print(f"{'OK  ' if ok else 'FAIL'} {name}")
@@ -393,6 +502,35 @@ def _selftest() -> int:
             for name, ok in checks:
                 f.write(f"{'OK' if ok else 'FAIL'} {name}\n")
     return 0 if all(ok for _, ok in checks) else 1
+
+
+def _selftest_settings() -> bool:
+    """配置读写往返：写入 → 读回 → 值一致，且坏 JSON 不炸。"""
+    global CONFIG_DIR, CONFIG_PATH
+    saved_dir, saved_path = CONFIG_DIR, CONFIG_PATH
+    tmpdir = os.path.join(os.environ.get("TEMP", "."), "pdfwm_settingtest")
+    try:
+        os.makedirs(tmpdir, exist_ok=True)
+        CONFIG_DIR = tmpdir
+        CONFIG_PATH = os.path.join(tmpdir, "settings.json")
+        probe = {"text": "内部资料 只读校验", "owner": "张三 A1234",
+                 "mode": "tile", "angle": 33.0, "opacity": 0.07,
+                 "scale": 0.5, "color": "#123456", "pages": "1-3",
+                 "layer": "under", "image": "", "raster": True}
+        if not save_settings(probe):
+            return False
+        back = load_settings()
+        if back != probe:
+            print(f"     mismatch: {back}")
+            return False
+        # 坏 JSON 必须退回 {}，不能让下次启动崩掉
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            f.write("{ this is not json")
+        if load_settings() != {}:
+            return False
+        return True
+    finally:
+        CONFIG_DIR, CONFIG_PATH = saved_dir, saved_path
 
 
 def main():
